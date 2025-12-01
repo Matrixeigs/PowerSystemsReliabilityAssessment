@@ -306,4 +306,4 @@ function run_full_simulation()
 end
 
 # Run the fixed version
-# run_full_simulation()
+run_full_simulation()
