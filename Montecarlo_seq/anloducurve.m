@@ -1,101 +1,95 @@
-function [busPd, busQd, loadpropor] = anloducurve(YEAR_HOUR)
-%[busPd, busQd, loadpropor] = anloducurve(YEAR_HOUR)
+function [busPd, busQd, load_factors] = anloducurve(TOTAL_HOURS)
+%% ========================================================================
+%  ANNUAL LOAD DURATION CURVE GENERATOR
+%  ========================================================================
+%  Purpose:
+%  Constructs the hourly load profile based on the IEEE RTS-79 specification.
+%  The load model is hierarchical:
+%  Load(t) = Peak_Load * Weekly_Factor * Daily_Factor * Hourly_Factor
 %
-%Establish the hourly load duration curve based on IEEE Reliability Test System 1979.
-%Normally, it consists of 8736 hours. Each bus has same load ratios at each certain time.
+%  Inputs:
+%  - TOTAL_HOURS: Number of hours to generate (usually 8736 or 8760)
 %
-%Inputs:
-%	YEAR_HOUR:	scalar						the number of points of annual load duration curve, 
-%											it actually should be 8760 (365*24), but IEEE RTS-79 
-%											only provides 8736 hours (52*7*24).
-%
-%Outputs:
-%	busPd:		Matrix(Ng+Nl, YEAR_HOUR)	Active power load at each bus for each hour
-%	busQd:		Matrix(Ng+Nl, YEAR_HOUR)	Reactive power load at a each bus for each hour
-%	loadpropor	Vector(1, YEAR_HOUR)		Load ratio at each bus for each hour
+%  Outputs:
+%  - busPd: Matrix of Active Load [NumBuses x Hours]
+%  - busQd: Matrix of Reactive Load [NumBuses x Hours]
+%  - load_factors: Vector of scaling factors [1 x Hours]
+%  ========================================================================
 
-%%%-------------------------------Function start--------------------------------------------------------------------------%%
-%tic
-	%%-------------------------------Load basic porfile-------------------------%%
+    % Load raw profile data (percentages)
+    ProfileData = case24_loadprofile();
+    load_factors = zeros(1, TOTAL_HOURS);
 
-	Loadprofile = case24_loadprofile;	
-	loadpropor = zeros(1, YEAR_HOUR);
-
-	%%-------------------------------Circulation structure for hourly load curve-------------%%
-	for ihour = 1 : YEAR_HOUR
-		
-		%%--------------------Identify a certain hour to corresponding week------------------------%%	
-		%% week classification
-		corweek = ceil(ihour/168);
+    %% Generate Hourly Factors
+    for hour_idx = 1 : TOTAL_HOURS
         
-		if corweek <= 8 || corweek >=44
-			weekflag = 'winter';
-		elseif corweek >= 18 && corweek <= 30
-			weekflag = 'summer';
-		elseif corweek <= 17 || corweek >= 31
-			weekflag = 'springfall';
-		else
-			disp('error');
-		end
-		%%-----------------------Identify a certain hour to corresponding day------------------------------------------%%			
-		
-		corday = ceil(mod(ihour/24, 7));
+        % 1. Determine Week of Year (1-52)
+        week_idx = ceil(hour_idx / 168); % 168 hours per week
         
-        if corday == 0	%%sunday the remainder is 0, needs to be calibrated
-            corday = 7; 
+        % Determine Season based on Week
+        if week_idx <= 8 || week_idx >= 44
+            season = 'winter';
+        elseif week_idx >= 18 && week_idx <= 30
+            season = 'summer';
+        else
+            season = 'springfall';
         end
-		
-		%% day classification
-		if corday <= 5
-			dayflag = 'weekday';
-		else
-			dayflag = 'weekend';
-		end
-		%%---------------------Identify a certain hour to corresponding hour-----------------------%%
-		corhour = mod(ihour, 24);
         
-        if corhour == 0	%%for 23:00-24:00 time interval, the remainder is 0, needs to be calibrated
-            corhour = 24;
+        % 2. Determine Day of Week (1=Mon ... 7=Sun)
+        day_idx = ceil(mod(hour_idx/24, 7));
+        if day_idx == 0; day_idx = 7; end
+        
+        if day_idx <= 5
+            day_type = 'weekday';
+        else
+            day_type = 'weekend';
         end
+        
+        % 3. Determine Hour of Day (1-24)
+        hour_of_day = mod(hour_idx, 24);
+        if hour_of_day == 0; hour_of_day = 24; end
 
-		%%-----------------------Obtain weekly ratio, daily ratio and hourly ratio ---------------------%%
+        % 4. Retrieve Factors
+        week_factor = ProfileData.weekly(week_idx);
+        day_factor  = ProfileData.daily(day_idx);
+        
+        % Retrieve Hourly Factor based on Season and Day Type
+        % ProfileData.hourly columns:
+        % 1: Winter Wkdy, 2: Winter Wknd
+        % 3: Summer Wkdy, 4: Summer Wknd
+        % 5: Spr/Fall Wkdy, 6: Spr/Fall Wknd
+        
+        col_idx = 0;
+        switch season
+            case 'winter'
+                if strcmp(day_type, 'weekday')
+                    col_idx = 1;
+                else
+                    col_idx = 2;
+                end
+            case 'summer'
+                if strcmp(day_type, 'weekday')
+                    col_idx = 3;
+                else
+                    col_idx = 4;
+                end
+            case 'springfall'
+                if strcmp(day_type, 'weekday')
+                    col_idx = 5;
+                else
+                    col_idx = 6;
+                end
+        end
+        
+        hour_factor = ProfileData.hourly(hour_of_day, col_idx);
 
-		weekpropor = Loadprofile.weekly(corweek);
-		daypropor = Loadprofile.daily(corday);
-
-		switch weekflag
-			case 'winter'
-				switch dayflag
-					case 'weekday'
-						hourpropor = Loadprofile.hourly(corhour, 1);
-					case 'weekend'
-						hourpropor = Loadprofile.hourly(corhour, 2);
-				end
-			case 'summer'
-				switch dayflag
-					case 'weekday'
-						hourpropor = Loadprofile.hourly(corhour, 3);
-					case 'weekend'
-						hourpropor = Loadprofile.hourly(corhour, 4);
-				end
-			case 'springfall'
-				switch dayflag
-					case 'weekday'
-						hourpropor = Loadprofile.hourly(corhour, 5);
-					case 'weekend'
-						hourpropor = Loadprofile.hourly(corhour, 6);
-				end
-		end
-
-		%%-----------------------Obtain hourly load duration curve ---------------------%%
-		loadpropor(1, ihour) = weekpropor * daypropor * hourpropor;			
+        % 5. Calculate Combined Factor
+        load_factors(hour_idx) = week_factor * day_factor * hour_factor;
     end
 
-	%%-------------------------------Obtain load duration curve for each bus---------------------%%    
-	
-	busPd = Loadprofile.busload(:, 2) * loadpropor;
-	busQd = Loadprofile.busload(:, 3) * loadpropor;
-    
-%toc   
-return
-%%-------------------------------function end---------------------%%		
+    %% Apply to Bus Loads
+    % busload(:,2) is Peak Active Load, busload(:,3) is Peak Reactive Load
+    busPd = ProfileData.busload(:, 2) * load_factors;
+    busQd = ProfileData.busload(:, 3) * load_factors;
+
+end

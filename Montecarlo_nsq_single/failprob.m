@@ -1,39 +1,41 @@
-function totalprob = failprob()
+function total_unavailability = failprob()
+%% ========================================================================
+%  COMPONENT UNAVAILABILITY CALCULATION
+%  ========================================================================
+%  Purpose:
+%  Calculates the probability that a component is in a failed state 
+%  (Unavailability, U) based on its failure rate and repair time.
+%
+%  Formulas:
+%  1. Unavailability (U) = MTTR / (MTTF + MTTR)
+%     where:
+%       MTTF = Mean Time To Failure = 1 / lambda
+%       MTTR = Mean Time To Repair  = 1 / mu
+%
+%  2. Alternatively: U = lambda / (lambda + mu)
+%  ========================================================================
 
-	failrate = case24_failrate;
-%%----------------------------------Generator data----------------------------------%%
-%	Compute the failure probability of generators
+    % Load raw data
+    data = case24_failrate();
 
-	probgen = failrate.genmttr ./ (failrate.genmttf + failrate.genmttr);
+    %% 1. Generator Unavailability
+    % Using Formula 1: U = MTTR / (MTTF + MTTR)
+    prob_gen = data.genmttr ./ (data.genmttf + data.genmttr);
 
-%{
-%	when taking considerations of planned maintainances
-	%	componet of maintainance 
-	weekhours = 7*24;
-	
-	mttrp = failrate.genweeks * weekhours;
-	genmiup = 8760./ mttrp;
-	mttfp = 8760 - mttrp;
-	genlambdap = 8760./mttfp;
+    % Note: Planned maintenance is currently commented out in the original logic.
+    % If included, it would add a scheduled outage rate component.
 
-	%	compoent of forced outage 
-	genmiu = 8760./ failrate.genmttr;
-	genlambda = 8760./ failrate.genmttf;
+    %% 2. Branch Unavailability
+    % First, calculate Repair Rate (mu) from Duration (r)
+    % mu = 8760 hours/year / Duration (hours)
+    branch_mu = 8760 ./ data.brdur;
+    
+    % Using Formula 2: U = lambda / (lambda + mu)
+    % data.brlambda is in failures/year
+    prob_branch = data.brlambda ./ (data.brlambda + branch_mu);
 
-%	combination of two parts
+    %% 3. Combine Results
+    % Concatenate generator and branch probabilities into a single vector
+    total_unavailability = horzcat(prob_gen, prob_branch);
 
-	probgen = 	(genlambda * genmiup + genlambdap * genmiu) ./ ...
-				(genlambda * genmiup + genlambdap * genmiu + genmiup * genmiu);
-%}
-
-%%----------------------------------Branch data----------------------------------%%
-
-	brmiu = 8760 ./ failrate.brdur;
-	probbr = failrate.brlambda ./ (failrate.brlambda + brmiu);
-
-%%----------------------------------Combination matrix----------------------------------%%
-
-	totalprob = horzcat(probgen, probbr);
-
-return;
-%%----------------------------------End-------------------------------------------%%
+end
