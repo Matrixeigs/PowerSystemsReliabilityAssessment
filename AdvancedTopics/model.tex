@@ -1,0 +1,128 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\begin{document}
+
+\section{Reliability Evaluation Framework Model}
+
+\subsection{Dynamic Bayesian Belief Network (DBBN) Prediction}
+The probability of a renewable generation event $y_n$ given a sequence of influencing events $x$ is calculated recursively:
+\begin{equation}
+P(y_n, x) = P(x_0) \prod_{t=1}^{n-1} P(x_t | x_{t-1}) P(y_n | x_n)
+\end{equation}
+where $P(x_t | x_{t-1})$ is the state transition rate and $P(y_n | x_n)$ is the conditional probability from the CPTs.
+
+\subsection{Generator Ageing and Forced Outage Rate}
+The hazard rate $h(t, Z(t))$ is modeled using the Proportional Hazard Model (PHM) based on Weibull distribution:
+\begin{equation}
+h(t, Z(t)) = \beta a^{-\beta} t^{\beta-1} e^{\gamma_1 Z_1(t) + \gamma_2 Z_2(t)^2}
+\end{equation}
+where $\beta$ is the shape parameter, $a$ is the scale parameter. $Z_1(t)$ represents temperature condition and $Z_2(t)$ represents loading rate.
+
+The probability of survival $R(t|t_0)$ and the hourly outage probability $F(t)$ are:
+\begin{equation}
+R(t | t_0) = \exp\left(-\int_{t_0}^{t} h(x, Z(x)) dx\right)
+\end{equation}
+\begin{equation}
+F(t) = 1 - e^{-\int_{t-1}^{t} h(x, Z(x)) dx} + F(t-1)e^{-\int_{t-1}^{t} h(x, Z(x)) dx}
+\end{equation}
+
+\subsection{Rolling-Horizon Unit Commitment (RH-UC)}
+The RH-UC solves the optimization for a horizon $[t_0, t_0+m]$ but implements only $t_0$.
+
+\subsubsection{Relaxed Constraints for Outages}
+When a generator fails (sampled based on $F(t)$), constraints are relaxed:
+\begin{equation}
+u_{g,t} \leq 1 - \sum_{i=t-T_r+1}^{t} out_{g,i}, \quad \forall g, t
+\end{equation}
+\begin{equation}
+p_{g,t-1} - p_{g,t} \leq RD_g + M_1 \times out_{g,t}
+\end{equation}
+\begin{equation}
+\sum_{i=t-TU_g+1}^{t} v_{g,i} \leq u_{g,t} + M_2 \times \sum_{i=t-TU_g+1}^{t} out_{g,i}
+\end{equation}
+where $out_{g,i}$ is binary (1 for failure), $T_r$ is repair time, $M_1, M_2$ are large numbers.
+
+\subsection{Double-Layer Storage Dispatch}
+\subsubsection{Day-Ahead Dispatch (Global Trend)}
+\begin{equation}
+soc_t = soc_{t-1} + p_{c,t} \eta_c - p_{d,t} / \eta_d
+\end{equation}
+\begin{equation}
+\sum_{g} P_{g,t} + P_{solar,t} + P_{wind,t} - p_{c,t} + p_{d,t} = D_t - loss_t
+\end{equation}
+
+\subsubsection{Rolling-Horizon Constraint}
+Ensures RH-UC follows the day-ahead SOC trend ($soc^{ref}$):
+\begin{equation}
+-\alpha \times soc^{max} \leq soc_t - soc^{ref}_t \leq \alpha \times soc^{max}
+\end{equation}
+
+\subsection{Monte Carlo Simulation Convergence}
+The simulation terminates when the Coefficient of Variation (CV) of LOLP meets the threshold $\delta$:
+\begin{equation}
+CV = \frac{\sqrt{\frac{1}{n(n-1)} \sum_{k=1}^{n} (LOLP_k - \overline{LOLP})^2}}{\overline{LOLP}} \leq \delta
+\end{equation}
+
+\section{Algorithm Flow}
+\begin{algorithmic}[1]
+\State Initialize system components and load data.
+\While {$CV > \delta$}
+    \State \textbf{Step 1:} Generate probability distributions of Solar/Wind using DBBN.
+    \For {time step $t = 1$ to $T_{horizon}$}
+        \State \textbf{Step 2:} Sample renewable generation $v_i$ based on CDF.
+        \State \textbf{Step 3:} Sample generator outage states based on accumulated $F(t)$.
+        \State \textbf{Step 4:} Solve RH-UC for window $[t, t+m]$.
+        \State \textbf{Step 5:} Implement dispatch for time $t$.
+        \State \textbf{Step 6:} Update generator ageing (accumulate hazard rate).
+        \State \textbf{Step 7:} Update Storage SOC.
+    \EndFor
+    \State Calculate LOLP and EENS for this scenario.
+    \State Update CV.
+\EndWhile
+\end{algorithmic}
+
+
+A. 发电机参数 (Generators)
+系统包含8台发电机，典型参数如下：
+
+参数符号	含义	典型值范围/示例 (Unit 1 - Unit 8)
+$P_{max}$	最大出力	80 MW - 455 MW
+$P_{min}$	最小出力	25 MW - 150 MW
+$a, b, c$	燃料成本系数	二次函数系数 (具体值见原文Table I)
+$RD/RU$	爬坡/滑坡速率	60 - 225 MW/h
+$TU/TD$	最小开/停机时间	4 - 10 小时
+$Cost_{start}$	启动成本	$1000 - $9000
+$Cost_{fix}$	固定运行成本	$100 - $450 /h
+$\beta$	威布尔分布形状参数	3 (用于老化模型)
+$Tr$	修复时间	5 小时 (假设值)
+B. 储能系统参数 (Energy Storage System)
+提取自 Table V：
+
+参数符号	含义	数值
+$E_{cap}$	储能容量	300 MWh
+$P_{c,max}$	最大充电功率	60 MW
+$P_{d,max}$	最大放电功率	60 MW
+$\eta_c$	充电效率	0.95
+$\eta_d$	放电效率	0.95
+$SOC_{min}$	最小荷电状态	10%
+$SOC_{max}$	最大荷电状态	90%
+$SOC_{ini}$	初始荷电状态	50%
+$\alpha$	滚动时域SOC偏差容忍度	0.1 (10%)
+C. 模拟与环境参数 (Simulation & Environment)
+参数	含义	数值/描述
+$T_{horizon}$	全局模拟时长	168 小时 (1周)
+$m$	滚动时域窗口长度	6 小时
+$P_{solar/wind}^{max}$	可再生能源最大出力	各 450 MW (约占峰值负荷25%)
+$Load_{peak}$	系统峰值负荷	1700 MW
+$\delta$	蒙特卡洛收敛阈值 (CV)	0.02
+$N_{sample}$	收敛所需样本数	约 234 次 (DBBN方法)
+$Z_1(t)$	温度协变量	{0: 正常, 1: 热, 2: 严峻}
+$Z_2(t)$	负载率协变量	[0, 1]
+D. 可靠性指标 (Reliability Indices)
+LOLP (Loss of Load Probability): 失负荷概率。
+EENS (Expected Energy Not Supplied): 期望缺供电量。
+
+\end{document}
